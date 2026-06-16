@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>One Wish Willow</title>
+<meta name="description" content="Make a wish. Snap the branch. Face the consequence.">
+<script>
+  try {
+    var d = JSON.parse(localStorage.getItem('oneWishWillowV2'));
+    if (d && d.snapped) {
+      document.documentElement.setAttribute('data-theme', 'horror');
+      document.write('<style>body{background:#030303}.innocent-wrap{display:none!important}</style>');
+    }
+  } catch(e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500;1,600&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="grain"></div>
+<div class="flash" id="flash"></div>
+<div class="flicker"></div>
+
+<!-- HORROR -->
+<div class="horror-wrap" id="horror">
+  <div class="horror-inner">
+    <div class="horror-tag">The branch has snapped</div>
+    <div class="receipt">
+      <div class="receipt-label">Wish Recorded</div>
+      <div class="receipt-text" id="receipt-text"></div>
+    </div>
+    <div class="loading-row active" id="loading">
+      <span>Interpreting</span>
+      <div class="loading-track"></div>
+    </div>
+    <div class="consequence-area">
+      <div class="consequence" id="consequence">
+        <div class="consequence-text" id="consequence-text"></div>
+      </div>
+      <div class="error-msg" id="error">The willow is silent. It may answer later.</div>
+    </div>
+  </div>
+</div>
+
+<!-- INNOCENT -->
+<div class="scene">
+  <div class="innocent-wrap" id="innocent">
+
+    <div class="willow-stage" id="willow-stage">
+      <canvas id="willow-canvas"></canvas>
+    </div>
+
+    <div class="header">
+      <h1 class="title">One Wish<br>Willow</h1>
+      <p class="subtitle">Make your wish — snap the branch</p>
+    </div>
+
+    <div class="wish-box">
+      <label class="wish-label" for="wish-input">Your wish</label>
+      <div class="input-wrap">
+        <textarea class="wish-input" id="wish-input" placeholder="I wish for..." maxlength="150" rows="1" autocomplete="off"></textarea>
+        <div class="input-rule"></div>
+      </div>
+      <span class="char-count" id="char-count">0 / 150</span>
+    </div>
+
+    <button class="snap-btn" id="snap-btn" disabled>
+      <span>Snap the branch</span>
+      <svg viewBox="0 0 16 16"><path d="M8 0l1.8 4.5L14.5 5 11 8.3l.7 5L8 11.5 4.3 13.3l.7-5L1.5 5l4.7-.5z"/></svg>
+    </button>
+
+  </div>
+</div>
+
+<script>
+// ===================== CANVAS WILLOW STICK =====================
+(function() {
+  const canvas = document.getElementById('willow-canvas');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('willow-stage');
+  let W, H, dpr;
+  let time = 0;
+  let tensionProgress = 0;   // 0..1
+  let breakProgress = -1;    // -1 = not breaking, 0..1 = breaking
+  let isTensing = false;
+  let isBroken = false;
+  let splinters = [];
+  let animId;
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = stage.clientWidth;
+    H = stage.clientHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Generate organic stick shape — horizontal (left to right)
+  const SEGMENTS = 40;
+  const stickPoints = [];
+  const barkNoise = [];
+  const seed = [0.3,0.7,0.1,0.9,0.5,0.2,0.8,0.4,0.6,0.15,0.85,0.35,0.65,0.45,0.55,0.25,0.75,0.05,0.95,0.33,
+                0.67,0.12,0.88,0.42,0.58,0.22,0.78,0.08,0.92,0.38,0.62,0.18,0.82,0.48,0.52,0.28,0.72,0.02,0.98,0.36,0.64];
+  for (let i = 0; i <= SEGMENTS; i++) {
+    const t = i / SEGMENTS;
+    const wobble = (seed[i % seed.length] - 0.5) * 3;
+    const curve = Math.sin(t * Math.PI * 1.1 - 0.4) * 8;
+    const x = W * 0.06 + t * W * 0.88;
+    const y = H / 2 + curve + wobble;
+    const taper = Math.sin(t * Math.PI);
+    const baseWidth = 9;
+    const bump = (seed[(i+5) % seed.length] - 0.5) * 1.5;
+    const w = baseWidth * (taper * 0.85 + 0.15) + bump;
+    stickPoints.push({ x, y, w: Math.max(w, 1.5) });
+    barkNoise.push(seed[(i+10) % seed.length]);
+  }
+
+  // Knots
+  const knots = [
+    { seg: Math.floor(SEGMENTS * 0.22), size: 3 },
+    { seg: Math.floor(SEGMENTS * 0.6), size: 2.2 },
+    { seg: Math.floor(SEGMENTS * 0.78), size: 1.5 },
+  ];
+
+  // Small twig positions
+  const twigSeg = Math.floor(SEGMENTS * 0.28);
+  const twigSeg2 = Math.floor(SEGMENTS * 0.72);
+
+  function getBreakIndex() { return Math.floor(SEGMENTS * 0.5); }
+
+  // Smooth path builder — top/bottom edges for horizontal stick
+  function buildSmoothPath(startIdx, endIdx) {
+    const topEdge = [];
+    const botEdge = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+      const p = stickPoints[i];
+      if (!p) continue;
+      topEdge.push({ x: p.x, y: p.y - p.w });
+      botEdge.push({ x: p.x, y: p.y + p.w });
+    }
+    ctx.beginPath();
+    if (topEdge.length < 2) return;
+    ctx.moveTo(topEdge[0].x, topEdge[0].y);
+    for (let i = 1; i < topEdge.length; i++) {
+      const prev = topEdge[i-1], curr = topEdge[i];
+      ctx.quadraticCurveTo(prev.x, prev.y, (prev.x+curr.x)/2, (prev.y+curr.y)/2);
+    }
+    const lastT = topEdge[topEdge.length-1];
+    ctx.lineTo(lastT.x, lastT.y);
+    const lastB = botEdge[botEdge.length-1];
+    ctx.lineTo(lastB.x, lastB.y);
+    for (let i = botEdge.length - 2; i >= 0; i--) {
+      const prev = botEdge[i+1], curr = botEdge[i];
+      ctx.quadraticCurveTo(prev.x, prev.y, (prev.x+curr.x)/2, (prev.y+curr.y)/2);
+    }
+    ctx.closePath();
+  }
+
+  function drawStickHalf(startIdx, endIdx, offsetX, offsetY, rotation, alpha) {
+    if (alpha <= 0) return;
+    ctx.save();
+    const breakPt = stickPoints[getBreakIndex()];
+    ctx.translate(breakPt.x + offsetX, breakPt.y + offsetY);
+    ctx.rotate(rotation);
+    ctx.translate(-breakPt.x, -breakPt.y);
+    ctx.globalAlpha = alpha;
+
+    // Main body with gradient (top-to-bottom for horizontal stick)
+    const topPt = stickPoints[startIdx] || stickPoints[0];
+    const botPt = stickPoints[Math.min(endIdx, SEGMENTS)];
+    const bodyGrad = ctx.createLinearGradient(0, topPt.y - 12, 0, topPt.y + 12);
+    bodyGrad.addColorStop(0, '#2a2016');
+    bodyGrad.addColorStop(0.25, '#4a3b2c');
+    bodyGrad.addColorStop(0.5, '#5e4d3a');
+    bodyGrad.addColorStop(0.75, '#4a3b2c');
+    bodyGrad.addColorStop(1, '#2a2016');
+    buildSmoothPath(startIdx, endIdx);
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+
+    // Bark texture — longitudinal grain lines (horizontal)
+    ctx.save();
+    buildSmoothPath(startIdx, endIdx);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(22,18,12,0.25)';
+    ctx.lineWidth = 0.6;
+    for (let line = 0; line < 5; line++) {
+      const off = (line - 2) * 2.5;
+      ctx.beginPath();
+      for (let i = startIdx; i <= endIdx; i++) {
+        const p = stickPoints[i];
+        if (!p) continue;
+        const ny = p.y + off + (barkNoise[i % barkNoise.length] - 0.5) * 2;
+        if (i === startIdx) ctx.moveTo(p.x, ny);
+        else ctx.lineTo(p.x, ny);
+      }
+      ctx.stroke();
+    }
+    // Cross-grain (vertical) bark cracks
+    ctx.strokeStyle = 'rgba(22,18,12,0.12)';
+    ctx.lineWidth = 0.4;
+    for (let i = startIdx + 2; i < endIdx; i += 4) {
+      const p = stickPoints[i];
+      if (!p) continue;
+      ctx.beginPath();
+      ctx.moveTo(p.x + (barkNoise[i]-0.5)*2, p.y - p.w * 0.7);
+      ctx.lineTo(p.x + (barkNoise[i]-0.5)*2, p.y + p.w * 0.7);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 3D highlight on bottom edge
+    ctx.strokeStyle = 'rgba(140,120,90,0.12)';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = startIdx; i <= endIdx; i++) {
+      const p = stickPoints[i];
+      if (!p) continue;
+      if (i === startIdx) ctx.moveTo(p.x, p.y + p.w * 0.55);
+      else ctx.lineTo(p.x, p.y + p.w * 0.55);
+    }
+    ctx.stroke();
+
+    // Dark shadow on top edge
+    ctx.strokeStyle = 'rgba(10,8,4,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = startIdx; i <= endIdx; i++) {
+      const p = stickPoints[i];
+      if (!p) continue;
+      if (i === startIdx) ctx.moveTo(p.x, p.y - p.w * 0.6);
+      else ctx.lineTo(p.x, p.y - p.w * 0.6);
+    }
+    ctx.stroke();
+
+    // Knots
+    knots.forEach(k => {
+      if (k.seg >= startIdx && k.seg <= endIdx) {
+        const p = stickPoints[k.seg];
+        // Outer ring
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y + p.w * 0.15, k.size * 0.9, k.size * 1.4, 0.2, 0, Math.PI*2);
+        ctx.fillStyle = '#352a1e';
+        ctx.fill();
+        // Inner dark
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y + p.w * 0.15, k.size * 0.4, k.size * 0.6, 0.2, 0, Math.PI*2);
+        ctx.fillStyle = '#1a150e';
+        ctx.fill();
+      }
+    });
+
+    // Twigs
+    [twigSeg, twigSeg2].forEach((ts, idx) => {
+      if (ts >= startIdx && ts <= endIdx) {
+        const tb = stickPoints[ts];
+        const dir = idx === 0 ? -1 : 1; // Top or bottom
+        ctx.strokeStyle = '#4a3b2c';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tb.x, tb.y + dir * tb.w);
+        ctx.quadraticCurveTo(
+          tb.x - 8, tb.y + dir * (tb.w + 18),
+          tb.x - 20, tb.y + dir * (tb.w + 28)
+        );
+        ctx.stroke();
+        // Sub-twig
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(tb.x - 5, tb.y + dir * (tb.w + 14));
+        ctx.quadraticCurveTo(
+          tb.x - 14, tb.y + dir * (tb.w + 22),
+          tb.x - 12, tb.y + dir * (tb.w + 32)
+        );
+        ctx.stroke();
+      }
+    });
+
+    ctx.restore();
+  }
+
+  function drawFractureMark() {
+    const bi = getBreakIndex();
+    const p = stickPoints[bi];
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30,24,16,0.5)';
+    ctx.lineWidth = 1;
+    // Subtle zigzag (vertical for horizontal stick)
+    ctx.beginPath();
+    ctx.moveTo(p.x - 1, p.y - p.w - 1);
+    ctx.lineTo(p.x + 2, p.y - p.w*0.3);
+    ctx.lineTo(p.x - 2, p.y + p.w*0.3);
+    ctx.lineTo(p.x + 1, p.y + p.w + 1);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function spawnSplinters() {
+    const bi = getBreakIndex();
+    const p = stickPoints[bi];
+    for (let i = 0; i < 12; i++) {
+      splinters.push({
+        x: p.x + (Math.random()-0.5) * 6,
+        y: p.y + (Math.random()-0.5) * 10,
+        vx: (Math.random()-0.5) * 8, // burst left/right
+        vy: -Math.random() * 6 - 2, // burst up
+        rot: Math.random() * Math.PI * 2,
+        vr: (Math.random()-0.5) * 0.3,
+        len: 4 + Math.random() * 10,
+        w: 0.8 + Math.random() * 1.2,
+        life: 1,
+      });
+    }
+  }
+
+  function drawSplinters() {
+    splinters.forEach(s => {
+      if (s.life <= 0) return;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.rot);
+      ctx.globalAlpha = s.life;
+      ctx.fillStyle = '#3a2e20';
+      ctx.fillRect(-s.len/2, -s.w/2, s.len, s.w); // longer horizontally
+      ctx.restore();
+      s.x += s.vx;
+      s.y += s.vy;
+      s.vy += 0.25; // gravity
+      s.rot += s.vr;
+      s.life -= 0.02;
+    });
+  }
+
+  function applyBreathing() {
+    const sway = Math.sin(time * 0.4) * 0.003;
+    for (let i = 0; i <= SEGMENTS; i++) {
+      const t = i / SEGMENTS;
+      const influence = (1 - t); // left end breathes more
+      stickPoints[i]._oy = stickPoints[i]._oy || stickPoints[i].y;
+      stickPoints[i].y = stickPoints[i]._oy + Math.sin(time * 0.5 + t * 2) * influence * 3;
+    }
+    return sway;
+  }
+
+  function draw() {
+    time += 0.016;
+    ctx.clearRect(0, 0, W, H);
+
+    const bi = getBreakIndex();
+
+    if (!isBroken) {
+      const sway = applyBreathing();
+
+      if (isTensing) {
+        tensionProgress = Math.min(1, tensionProgress + 0.025);
+        // Bend: left half rotates one way, right the other
+        const bend = tensionProgress * 0.12;
+        ctx.save();
+        const bp = stickPoints[bi];
+        ctx.translate(bp.x, bp.y);
+        ctx.rotate(bend);
+        ctx.translate(-bp.x, -bp.y);
+        drawStickHalf(0, bi, 0, 0, 0, 1);
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(bp.x, bp.y);
+        ctx.rotate(-bend);
+        ctx.translate(-bp.x, -bp.y);
+        drawStickHalf(bi, SEGMENTS, 0, 0, 0, 1);
+        ctx.restore();
+
+        // Stress marks at break point
+        if (tensionProgress > 0.5) {
+          ctx.strokeStyle = `rgba(80,60,30,${(tensionProgress-0.5)*0.8})`;
+          ctx.lineWidth = 0.5;
+          const p = stickPoints[bi];
+          for (let j = 0; j < 3; j++) {
+            ctx.beginPath();
+            const ox = (Math.random()-0.5) * 4;
+            const oy = (Math.random()-0.5) * p.w * 2;
+            ctx.moveTo(p.x + ox - 2, p.y + oy - 2);
+            ctx.lineTo(p.x + ox + 2, p.y + oy + 2);
+            ctx.stroke();
+          }
+        }
+      } else {
+        // Normal idle
+        drawStickHalf(0, SEGMENTS, 0, 0, 0, 1);
+        drawFractureMark();
+      }
+    } else {
+      // Breaking animation
+      breakProgress = Math.min(1, breakProgress + 0.02);
+      const t = breakProgress;
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+
+      // Left half flies up-left
+      const leftRot = -eased * 0.8;
+      const leftX = -eased * 100;
+      const leftY = -eased * 40;
+      const leftAlpha = 1 - eased;
+      drawStickHalf(0, bi, leftX, leftY, leftRot, leftAlpha);
+
+      // Right half flies down-right
+      const rightRot = eased * 0.5;
+      const rightX = eased * 80;
+      const rightY = eased * 60;
+      const rightAlpha = 1 - eased;
+      drawStickHalf(bi, SEGMENTS, rightX, rightY, rightRot, rightAlpha);
+
+      drawSplinters();
+    }
+
+    animId = requestAnimationFrame(draw);
+  }
+
+  draw();
+
+  // Expose for snap
+  window.willowCanvas = {
+    startTension() { isTensing = true; },
+    snap() {
+      isBroken = true;
+      isTensing = false;
+      breakProgress = 0;
+      spawnSplinters();
+    },
+    hide() {
+      cancelAnimationFrame(animId);
+    }
+  };
+})();
+
+// ===================== APP LOGIC =====================
+(function() {
+  const KEY = 'oneWishWillowV2';
+  const MAX = 150;
+  const $ = id => document.getElementById(id);
+
+  const innocent = $('innocent');
+  const horror = $('horror');
+  const wishInput = $('wish-input');
+  const snapBtn = $('snap-btn');
+  const charCount = $('char-count');
+  const flash = $('flash');
+  const consequence = $('consequence');
+  const cText = $('consequence-text');
+  const loading = $('loading');
+  const errorEl = $('error');
+  const receiptText = $('receipt-text');
+
+  let snapped = false, typeTimer = null;
+
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+  function save(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch {} }
+
+  // Sound
+  function crack() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const t = ctx.currentTime;
+      // Snap noise
+      const len = 0.12;
+      const buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * Math.pow(1-i/d.length, 3.5);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const g = ctx.createGain(); g.gain.setValueAtTime(1, t); g.gain.exponentialRampToValueAtTime(0.001, t+len);
+      src.connect(g).connect(ctx.destination); src.start(t); src.stop(t+len);
+      // Sub boom
+      const osc = ctx.createOscillator(); osc.type='sine';
+      osc.frequency.setValueAtTime(50,t); osc.frequency.exponentialRampToValueAtTime(12,t+0.6);
+      const g2 = ctx.createGain(); g2.gain.setValueAtTime(0.7,t); g2.gain.exponentialRampToValueAtTime(0.001,t+0.6);
+      osc.connect(g2).connect(ctx.destination); osc.start(t); osc.stop(t+0.6);
+      // Creak
+      const osc2 = ctx.createOscillator(); osc2.type='sawtooth';
+      osc2.frequency.setValueAtTime(180,t); osc2.frequency.exponentialRampToValueAtTime(60,t+0.15);
+      const g3 = ctx.createGain(); g3.gain.setValueAtTime(0.15,t); g3.gain.exponentialRampToValueAtTime(0.001,t+0.15);
+      osc2.connect(g3).connect(ctx.destination); osc2.start(t); osc2.stop(t+0.15);
+    } catch {}
+  }
+
+  // Typewriter
+  function typewrite(text) {
+    consequence.classList.add('visible');
+    loading.classList.remove('active');
+    cText.innerHTML = '';
+    const chars = [...text];
+    let i = 0;
+    function tick() {
+      if (i >= chars.length) {
+        const s = load(); if (s) { s.consequence = text; save(s); }
+        return;
+      }
+      const ch = chars[i];
+      const span = document.createElement('span');
+      span.textContent = ch;
+      span.style.opacity = '0';
+      cText.appendChild(span);
+      requestAnimationFrame(() => { span.style.opacity = '1'; });
+      const delay = '.!?'.includes(ch) ? 160 : ',;:'.includes(ch) ? 90 : ch===' ' ? 18 : 12 + Math.random()*14;
+      i++;
+      typeTimer = setTimeout(tick, delay);
+    }
+    tick();
+  }
+
+  // API
+  async function fetchConsequence(wish) {
+    try {
+      const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({wish}) });
+      if (!r.ok) throw 0;
+      const d = await r.json();
+      return d.consequence || null;
+    } catch { return null; }
+  }
+
+  // SNAP
+  async function doSnap() {
+    if (snapped || typeTimer) return;
+    const wish = wishInput.value.trim();
+    if (!wish || wish.length > MAX) return;
+    snapped = true;
+    snapBtn.disabled = true;
+    wishInput.disabled = true;
+    save({ snapped:true, wish, consequence:null });
+
+    // 1) Tension
+    window.willowCanvas.startTension();
+
+    // 2) Wait, then snap
+    const textPromise = fetchConsequence(wish);
+
+    setTimeout(() => {
+      crack();
+      window.willowCanvas.snap();
+
+      setTimeout(() => document.body.classList.add('shaking'), 60);
+      setTimeout(() => flash.classList.add('fire'), 80);
+
+      setTimeout(() => {
+        document.body.setAttribute('data-theme', 'horror');
+        innocent.classList.add('fade-out');
+      }, 300);
+
+      setTimeout(() => {
+        window.willowCanvas.hide();
+        horror.classList.add('active');
+        innocent.style.display = 'none';
+        receiptText.textContent = '"' + wish + '"';
+      }, 700);
+    }, 700);
+
+    const text = await textPromise;
+    setTimeout(() => {
+      if (text) typewrite(text);
+      else { loading.classList.remove('active'); errorEl.classList.add('active'); }
+    }, 1800);
+  }
+
+  // Restore
+  async function restore() {
+    const s = load();
+    if (!s || !s.snapped) return;
+    snapped = true;
+    document.body.setAttribute('data-theme', 'horror');
+    innocent.style.display = 'none';
+    if (window.willowCanvas) window.willowCanvas.hide();
+    horror.classList.add('active');
+    const hi = horror.querySelector('.horror-inner');
+    hi.style.animation='none'; hi.style.opacity='1'; hi.style.transform='none'; hi.style.filter='none';
+    receiptText.textContent = '"' + s.wish + '"';
+    if (s.consequence) {
+      consequence.classList.add('visible');
+      loading.classList.remove('active');
+      cText.textContent = s.consequence;
+    } else {
+      const text = await fetchConsequence(s.wish);
+      if (text) typewrite(text);
+      else { loading.classList.remove('active'); errorEl.classList.add('active'); }
+    }
+  }
+
+  // Input
+  wishInput.addEventListener('input', () => {
+    const len = wishInput.value.length;
+    charCount.textContent = len + ' / ' + MAX;
+    charCount.classList.toggle('over', len > MAX * 0.93);
+    snapBtn.disabled = len === 0 || len > MAX;
+    wishInput.style.height = 'auto';
+    wishInput.style.height = wishInput.scrollHeight + 'px';
+  });
+  wishInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!snapBtn.disabled) doSnap(); }
+  });
+  snapBtn.addEventListener('click', doSnap);
+
+  restore();
+})();
+</script>
+</body>
+</html>
