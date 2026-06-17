@@ -40,7 +40,9 @@
       <div class="consequence" id="consequence">
         <div class="consequence-text" id="consequence-text"></div>
       </div>
-      <div class="error-msg" id="error">The willow is silent. It may answer later.</div>
+      <div class="error-msg" id="error">Your wish is granted.
+
+⚠️ Disclaimer — it cannot be undone.</div>
     </div>
   </div>
 </div>
@@ -520,6 +522,10 @@
   async function fetchConsequence(wish) {
     try {
       const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({wish}) });
+      if (r.status === 429) {
+        // Rate limited — show the disclaimer
+        return null;
+      }
       if (!r.ok) throw 0;
       const d = await r.json();
       return d.consequence || null;

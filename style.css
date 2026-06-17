@@ -27,11 +27,13 @@
 [data-theme="horror"] {
   --ink: #e8e8e8;
   --ink-soft: #999;
-  --ink-muted: #555;
+  --ink-muted: #666;
   --bg: #030303;
-  --gold: #8b1a1a;
-  --gold-soft: rgba(139, 26, 26, 0.12);
-  --border: rgba(139, 26, 26, 0.2);
+  --gold: #d43333;
+  --gold-soft: rgba(212, 51, 51, 0.15);
+  --red: #ff3b3b;
+  --red-soft: rgba(255, 59, 59, 0.2);
+  --border: rgba(212, 51, 51, 0.25);
   --serif: var(--mono);
   --sans: var(--mono);
 }
@@ -452,12 +454,13 @@ body.shaking {
 }
 
 .horror-tag {
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.3em;
-  color: var(--gold);
+  color: #ff4444;
   padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(255, 68, 68, 0.3);
+  text-shadow: 0 0 16px rgba(255, 68, 68, 0.5), 0 0 40px rgba(255, 68, 68, 0.15);
 }
 
 .receipt {
@@ -486,6 +489,10 @@ body.shaking {
   padding-left: 1.25rem;
   border-left: 1px solid var(--border);
   min-height: 100px;
+}
+
+[data-theme="horror"] .consequence-area {
+  border-left-color: rgba(255, 68, 68, 0.4);
 }
 
 .consequence {
@@ -576,13 +583,22 @@ body.shaking {
 
 .error-msg {
   display: none;
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   color: var(--gold);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  text-shadow: 0 0 8px var(--gold-soft);
 }
 
 .error-msg.active {
   display: block;
+  animation: errorFadeIn 1s var(--ease-out) forwards;
+}
+
+@keyframes errorFadeIn {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: none; }
 }
 
 @media(max-width:600px) {
